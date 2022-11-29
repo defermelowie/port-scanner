@@ -19,6 +19,7 @@ pub struct Port {
 /// - A vector of ports to scan
 #[derive(Debug, Clone, PartialEq)]
 pub struct Target {
+    pub name: String,
     pub address: SocketAddr,
     pub ports: Vec<Port>,
 }

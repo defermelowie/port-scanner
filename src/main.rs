@@ -20,7 +20,11 @@ struct Args {
 
     /// Ports to scan
     #[clap(short, long)]
-    ports: Option<Vec<u16>>,
+    port: Option<Vec<u16>>,
+
+    /// Amount of common ports to scan (maximum 5000)
+    #[clap(short, long)]
+    common: Option<usize>,
 }
 
 #[tokio::main]
@@ -28,8 +32,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Get arguments
     let args = Args::parse();
 
+    // Get amount of common ports
+    let common_port_amount = match args.common {
+        Some(amount) => amount,
+        None => 1000,
+    };
+
     // Get port vector
-    let ports_to_scan = match args.ports {
+    let mut ports_to_scan = match args.port {
         Some(p) => p
             .iter()
             .map(|nr| Port {
@@ -38,17 +48,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 is_open: None,
             })
             .collect(),
-        None => get_common_ports(1000),
+        None => Vec::new(),
     };
+    ports_to_scan.append(&mut get_common_ports(common_port_amount).to_owned());
 
     // Dns lookup
     let mut targets = Vec::new();
-    for addr in args.address.iter() {
-        let target = format!("{}:0", addr);
+    for url in args.address.iter() {
+        let target = format!("{}:0", url);
         let mut addresses = lookup_host(target).await?;
         while let Some(address) = addresses.next() {
             targets.push(Target {
-                address,
+                name: url.to_string(),
+                address: address,
                 ports: ports_to_scan.to_owned(),
             });
         }
@@ -59,7 +71,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Print output
     for target in scan_res.iter() {
-        println!("Open tcp ports for {}:", target.address.ip());
+        println!(
+            "Open tcp ports for {} ({}):",
+            target.address.ip(),
+            target.name
+        );
         for port in target.ports.iter() {
             if port.is_open.expect("No port scanning result available") {
                 println!("  {}\t{}", port.number, port.service);
