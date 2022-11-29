@@ -8,17 +8,18 @@ mod common_ports;
 use common_ports::get_common_ports;
 
 mod port;
-use port::{scan_ports, Port};
+use port::{scan_targets, Port, Target};
 
 /// Command line arguments
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Address to scan
-    address: String,
+    #[clap(required = true)]
+    address: Vec<String>,
 
     /// Ports to scan
-    #[arg(short, long)]
+    #[clap(short, long)]
     ports: Option<Vec<u16>>,
 }
 
@@ -26,10 +27,6 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
     // Get arguments
     let args = Args::parse();
-
-    // Dns lookup
-    let target = format!("{}:0", args.address);
-    let sock_addr = lookup_host(target).await?.next().unwrap();
 
     // Get port vector
     let ports_to_scan = match args.ports {
@@ -44,15 +41,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
         None => get_common_ports(1000),
     };
 
-    // Scan ports
-    let port_scan_res = scan_ports(sock_addr, ports_to_scan).await;
+    // Dns lookup
+    let mut targets = Vec::new();
+    for addr in args.address.iter() {
+        let target = format!("{}:0", addr);
+        let mut addresses = lookup_host(target).await?;
+        while let Some(address) = addresses.next() {
+            targets.push(Target {
+                address,
+                ports: ports_to_scan.to_owned(),
+            });
+        }
+    }
+
+    // Scan targets
+    let scan_res = scan_targets(targets).await;
 
     // Print output
-    println!("Open tcp ports for {}:", sock_addr.ip());
-    for port in port_scan_res.iter() {
-        if port.is_open.expect("No port scanning result available") {
-            println!("  {}\t{}", port.number, port.service);
+    for target in scan_res.iter() {
+        println!("Open tcp ports for {}:", target.address.ip());
+        for port in target.ports.iter() {
+            if port.is_open.expect("No port scanning result available") {
+                println!("  {}\t{}", port.number, port.service);
+            }
         }
+        print!("{}", '\n');
     }
 
     // End program

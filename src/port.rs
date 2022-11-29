@@ -14,10 +14,49 @@ pub struct Port {
     pub is_open: Option<bool>,
 }
 
-// Todo: make `scan_ports` private and create public `scan_hosts` instead
-// Todo: make `ports` param require iterable instead of vec
+/// A target consisting out of:
+/// - An address
+/// - A vector of ports to scan
+#[derive(Debug, Clone, PartialEq)]
+pub struct Target {
+    pub address: SocketAddr,
+    pub ports: Vec<Port>,
+}
+
+/// Scan ports of multiple targets
+pub async fn scan_targets(targets: Vec<Target>) -> Vec<Target> {
+    // Define input and output channels
+    let (targets_tx, mut targets_rx) = mpsc::channel(targets.len());
+
+    // Spawn scanning tasks
+    let mut scan_tasks = Vec::new();
+    for target in targets.iter() {
+        let targets_tx = targets_tx.clone();
+        let mut target = target.to_owned();
+
+        let scan_task = tokio::spawn(async move {
+            target.ports = scan_ports(target.address, target.ports).await;
+            let _ = targets_tx.send(target).await;
+        });
+        scan_tasks.push(scan_task);
+    }
+
+    // Wait for all tasks to finish & close channel
+    join_all(scan_tasks).await;
+    targets_rx.close();
+
+    // Collect result
+    let mut target_res = Vec::new();
+    while let Some(target) = targets_rx.recv().await {
+        target_res.push(target);
+    }
+
+    // Return ports
+    target_res
+}
+
 /// Scan multiple ports of a target
-pub async fn scan_ports(target: SocketAddr, ports: Vec<Port>) -> Vec<Port> {
+async fn scan_ports(target: SocketAddr, ports: Vec<Port>) -> Vec<Port> {
     // Define input and output channels
     let (ports_tx, mut ports_rx) = mpsc::channel(ports.len());
 
